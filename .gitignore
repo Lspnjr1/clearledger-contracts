@@ -12,12 +12,12 @@ target/
 *.swo
 *~
 .idea/
-.vscode/
 
 # OS files
 .DS_Store
 Thumbs.db
 
+temp_auto_push.bat
 # Logs
 *.log
 
@@ -38,3 +38,5 @@ contracts/*/test_snapshots/
 
 # Personal local-agent runner state (not repo configuration)
 .gemini/
+.gitignore
+branch_structure.json
