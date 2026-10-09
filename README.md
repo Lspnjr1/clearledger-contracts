@@ -12,22 +12,6 @@ See [contract architecture](docs/NEW_DESIGN.md), [deployment guidance](DEPLOYMEN
 
 ---
 
-
-For security issues, follow the private reporting instructions in `SECURITY.md`. For code changes, use the contribution guidance in `CONTRIBUTING.md`.
-
-### Maintainer Tooling
-
-Seed-issue generator scripts live in [`scripts/maintainer/`](./scripts/maintainer/), which is the **only supported location** for this tooling:
-
-- `create_issues.py` — generate issues from a template
-- `create-contract-issues.sh` / `create-contract-issues.ps1` — shell/PowerShell helpers
-
-Run any script from the repo root, e.g. `bash scripts/maintainer/create-contract-issues.sh`.
-
-> Any `create_issues.*` files found at the repo root are stale duplicates left over from before this tooling was consolidated under `scripts/maintainer/`. Do not use them — they lack the rate-limit/dedup guards the `scripts/maintainer/` versions have.
-
----
-
 ## Contracts
 
 ### registry_contract
