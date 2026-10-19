@@ -221,6 +221,9 @@ Cancelled = 8   // issuer cancelled before listing
 
 ## Contract: escrow_contract
 
+For sequence diagrams showing when these entries are written, released, and
+rolled back, see [`contracts/escrow/CUSTODY.md`](../contracts/escrow/CUSTODY.md).
+
 ### Instance Storage
 
 | DataKey | Type | Description | Set During |

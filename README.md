@@ -114,7 +114,7 @@ set_agent_registry_contract(agent_registry_contract) → bool
 Holds USDC between pool funding and issuer payout. Only callable by `pool_contract`.
 
 ```
-lock(invoice_id, amount) → bool
+lock(invoice_id, amount, issuer) → bool
 release_to_issuer(invoice_id, issuer) → bool
 release_to_pool(invoice_id, repayment_amount) → bool
 handle_default(invoice_id, caller) → bool   ← admin or pool_contract
@@ -125,6 +125,10 @@ get_locked(invoice_id) → u128
 When the escrow is paused, `initialize`, `lock`, `release_to_issuer`,
 `release_to_pool`, and `handle_default` all revert with `ContractPaused`.
 Read-only views (`get_locked`) stay callable.
+
+See [escrow custody and recovery paths](./contracts/escrow/CUSTODY.md) for
+sequence diagrams covering funding, repayment, default, authorization, and
+rollback behavior.
 
 ### pool_contract
 

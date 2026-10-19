@@ -497,6 +497,10 @@ Emitted when the admin disengages the emergency circuit breaker.
 **Contract:** `escrow_contract`  
 **Source:** `contracts/escrow/src/events.rs`
 
+For the full custody, authorization, asset-movement, and rollback flow that
+produces these events, see
+[`contracts/escrow/CUSTODY.md`](../contracts/escrow/CUSTODY.md).
+
 ### `funds_locked`
 
 Emitted when funds are locked in escrow for an invoice.
