@@ -1464,6 +1464,94 @@ fn test_unpause_requires_admin_authorization() {
             fn_name: "unpause",
             args: soroban_sdk::Vec::new(&env),
             sub_invokes: &[],
+#[test]
+fn test_pause_matrix_preserves_balances_records_history_and_events() {
+    use soroban_sdk::xdr::ToXdr;
+    for operation in 0..4 {
+        let (env, client, admin, pool, issuer, usdc) = setup();
+        let id = generate_invoice_id(&env, 550 + operation);
+        let second = generate_invoice_id(&env, 560 + operation);
+        let amount = 1_000_000u128;
+        client.lock(&id, &amount, &issuer);
+        // Default is otherwise eligible, so the breaker is the sole blocker.
+        env.ledger().set_timestamp(env.ledger().timestamp() + 60);
+        client.pause();
+        let history = client.get_history(&id).to_xdr(&env);
+        let balances = (
+            get_balance(&env, &usdc, &pool),
+            get_balance(&env, &usdc, &client.address),
+            get_balance(&env, &usdc, &issuer),
+        );
+        let locked_at = client.get_locked_at(&id);
+        let events = env.events().all().len();
+        let rejected = match operation {
+            0 => client.try_lock(&second, &amount, &issuer).is_err(),
+            1 => client.try_release_to_issuer(&id, &issuer).is_err(),
+            2 => client.try_release_to_pool(&id, &amount).is_err(),
+            _ => client.try_handle_default(&id, &pool).is_err(),
+        };
+        assert!(rejected);
+        assert_eq!(client.get_locked(&id), amount);
+        assert_eq!(client.get_locked(&second), 0);
+        assert_eq!(client.get_locked_at(&id), locked_at);
+        assert_eq!(client.get_history(&id).to_xdr(&env), history);
+        assert_eq!(
+            (
+                get_balance(&env, &usdc, &pool),
+                get_balance(&env, &usdc, &client.address),
+                get_balance(&env, &usdc, &issuer)
+            ),
+            balances
+        );
+        assert_eq!(env.events().all().len(), events);
+        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.get_pool_contract(), pool);
+        assert_eq!(client.get_usdc_asset(), usdc);
+        assert!(client.get_history(&second).is_empty());
+        client.unpause();
+        let succeeded = match operation {
+            0 => client.lock(&second, &amount, &issuer),
+            1 => client.release_to_issuer(&id, &issuer),
+            2 => client.release_to_pool(&id, &amount),
+            _ => client.handle_default(&id, &pool),
+        };
+        assert!(succeeded);
+        if operation == 0 {
+            assert_eq!(client.get_locked(&second), amount);
+        } else {
+            assert_eq!(client.get_locked(&id), 0);
+        }
+    }
+}
+
+#[test]
+fn test_initialize_is_blocked_by_stored_pause_and_recoverable_after_unpause() {
+    // Public pause requires initialization. Seed the shared breaker on a fresh
+    // deployment to independently test initialize's own pause guard.
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let pool = Address::generate(&env);
+    let token = Address::generate(&env);
+    let id = env.register_contract(None, EscrowContract);
+    let client = EscrowContractClient::new(&env, &id);
+    env.as_contract(&id, || clearledger_pause::set_paused(&env, true));
+    let events = env.events().all().len();
+    assert!(client.try_initialize(&admin, &pool, &token).is_err());
+    assert_eq!(env.events().all().len(), events);
+    env.as_contract(&id, || {
+        assert!(!env.storage().instance().has(&DataKey::Admin));
+        assert!(!env.storage().instance().has(&DataKey::PoolContract));
+        assert!(!env.storage().instance().has(&DataKey::UsdcAsset));
+        clearledger_pause::set_paused(&env, false);
+    });
+    client.initialize(&admin, &pool, &token);
+    assert_eq!(client.get_admin(), admin);
+    assert_eq!(client.get_pool_contract(), pool);
+    assert_eq!(client.get_usdc_asset(), token);
+    assert!(client.try_initialize(&admin, &pool, &token).is_err());
+}
+
         },
     }]);
     assert!(client.try_unpause().is_err());
