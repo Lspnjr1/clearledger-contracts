@@ -7,8 +7,9 @@ use soroban_sdk::{contracttype, BytesN};
 /// - `amount` must be greater than zero — guaranteed by [`EscrowContract::lock`].
 /// - `locked_at` is set to `env.ledger().timestamp()` at lock time and is never
 ///   updated for the lifetime of the record.
-/// - A record is removed (via `persistent().remove`) when escrow is released
-///   or default-handled; after removal `get_locked` / `get_locked_at` return `0`.
+/// - Partial pool releases reduce `amount` and retain this record. Terminal
+///   release or default removes it; afterward `get_locked` / `get_locked_at`
+///   return `0`.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct EscrowRecord {

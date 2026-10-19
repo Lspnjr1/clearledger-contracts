@@ -634,7 +634,7 @@ fn test_release_to_pool_partial_repayment_succeeds() {
     let partial: u128 = 500_000_000;
     let result = client.release_to_pool(&invoice_id, &partial);
     assert!(result);
-    assert_eq!(client.get_locked(&invoice_id), 0);
+    assert_eq!(client.get_locked(&invoice_id), amount - partial);
 
     // Verify pool received exactly `partial`, not the full locked `amount`
     let pool_balance_after = get_balance(&env, &usdc_id, &pool);
@@ -985,6 +985,52 @@ fn test_get_locked_returns_zero_after_release_to_issuer() {
 
     client.release_to_issuer(&invoice_id, &issuer);
     assert_eq!(client.get_locked(&invoice_id), 0);
+}
+
+#[test]
+fn prop_partial_pool_releases_conserve_initial_lock_and_residual() {
+    let strategy = (
+        proptest::collection::vec(1u128..10_000, 1..16),
+        1u128..10_000,
+    );
+    let mut runner = TestRunner::new(ProptestConfig::with_cases(16));
+    runner
+        .run(&strategy, |(chunks, tail)| {
+            let (env, client, _admin, pool, issuer, usdc) = setup();
+            let id = generate_invoice_id(&env, 530);
+            let initial = chunks.iter().copied().sum::<u128>() + tail;
+            client.lock(&id, &initial, &issuer);
+            let locked_at = client.get_locked_at(&id);
+            let pool_after_lock = get_balance(&env, &usdc, &pool);
+            let mut released = 0u128;
+            for (i, amount) in chunks.iter().enumerate() {
+                prop_assert!(client.release_to_pool(&id, amount));
+                released += amount;
+                let residual = client.get_locked(&id);
+                prop_assert_eq!(released + residual, initial);
+                prop_assert_eq!(get_balance(&env, &usdc, &client.address), residual as i128);
+                prop_assert_eq!(
+                    get_balance(&env, &usdc, &pool) - pool_after_lock,
+                    released as i128
+                );
+                prop_assert_eq!(client.get_locked_at(&id), locked_at);
+                let history = client.get_history(&id);
+                prop_assert_eq!(history.len(), i as u32 + 2);
+                prop_assert_eq!(history.get(history.len() - 1).unwrap().amount, *amount);
+            }
+            prop_assert!(client.try_release_to_pool(&id, &0).is_err());
+            prop_assert_eq!(client.get_locked(&id), tail);
+            prop_assert!(client.release_to_pool(&id, &tail));
+            prop_assert_eq!(client.get_locked(&id), 0);
+            prop_assert_eq!(get_balance(&env, &usdc, &client.address), 0);
+            prop_assert!(client.try_release_to_pool(&id, &1).is_err());
+            prop_assert_eq!(
+                get_balance(&env, &usdc, &pool) - pool_after_lock,
+                initial as i128
+            );
+            Ok(())
+        })
+        .unwrap();
 }
 
 #[test]

@@ -317,7 +317,7 @@ impl EscrowContract {
         }
 
         let key = DataKey::Locked(invoice_id.clone());
-        let _record: EscrowRecord = env
+        let mut record: EscrowRecord = env
             .storage()
             .persistent()
             .get(&key)
@@ -337,7 +337,17 @@ impl EscrowContract {
             repayment_amount,
             None,
         );
-        env.storage().persistent().remove(&key);
+        if repayment_amount < record.amount {
+            record.amount -= repayment_amount;
+            env.storage().persistent().set(&key, &record);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+        } else {
+            // Buyer repayment may include yield above the original lock.
+            // Preserve the existing terminal-settlement behavior in that case.
+            env.storage().persistent().remove(&key);
+        }
         Self::extend_instance_ttl(&env);
         events::released_to_pool(&env, &invoice_id, &pool, repayment_amount);
         true
