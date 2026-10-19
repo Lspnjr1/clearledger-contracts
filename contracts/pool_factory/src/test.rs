@@ -4,15 +4,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+use clearledger_escrow::EscrowContractClient;
+use clearledger_invoice::InvoiceContractClient;
+use clearledger_pool::PoolContractClient;
+use clearledger_registry::{RegistryContract, RegistryContractClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
     xdr::ToXdr,
     Address, Bytes, BytesN, Env, Map, String, Symbol, TryFromVal,
 };
-use clearledger_escrow::EscrowContractClient;
-use clearledger_invoice::InvoiceContractClient;
-use clearledger_pool::PoolContractClient;
-use clearledger_registry::{RegistryContract, RegistryContractClient};
 
 use crate::{
     DataKey, PoolFactoryContract, PoolFactoryContractClient, DEFAULT_MIN_INITIAL_DEPOSIT,
@@ -467,6 +467,24 @@ fn test_register_existing_pool_rejects_account_address() {
 }
 
 #[test]
+fn test_register_existing_pool_malformed_pool_leaves_no_state() {
+    let te = setup();
+    let events_before = te.env.events().all().len();
+    // A plain account cannot answer `get_funding_asset`, so it is not a pool.
+    let result = te
+        .factory
+        .try_register_existing_pool(&te.asset, &Address::generate(&te.env));
+    assert!(
+        std::format!("{result:?}").contains("#5"),
+        "expected InvalidPool, got {result:?}"
+    );
+
+    assert_eq!(te.factory.get_pool_for_asset(&te.asset), None);
+    assert_eq!(te.factory.list_assets().len(), 0);
+    assert_eq!(te.env.events().all().len(), events_before);
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #5)")]
 fn test_register_existing_pool_rejects_non_pool_contract() {
     let te = setup();
@@ -475,12 +493,47 @@ fn test_register_existing_pool_rejects_non_pool_contract() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #5)")]
-fn test_register_existing_pool_rejects_wrong_asset_pool() {
+fn test_register_existing_pool_rejects_wrong_asset_without_state_change() {
     let te = setup();
     let other_asset = Address::generate(&te.env);
     let pool_address = new_initialized_pool(&te, &other_asset);
-    te.factory.register_existing_pool(&te.asset, &pool_address);
+    let events_before = te.env.events().all().len();
+
+    // The pool is readable and valid, but it custodies a different asset than
+    // the caller declared. Registration must fail with the dedicated mismatch
+    // error and write nothing.
+    let result = te
+        .factory
+        .try_register_existing_pool(&te.asset, &pool_address);
+    assert!(
+        std::format!("{result:?}").contains("#6"),
+        "expected FundingAssetMismatch, got {result:?}"
+    );
+
+    assert_eq!(te.factory.get_pool_for_asset(&te.asset), None);
+    assert_eq!(te.factory.get_pool_for_asset(&other_asset), None);
+    assert_eq!(te.factory.list_assets().len(), 0);
+    assert_eq!(te.env.events().all().len(), events_before);
+}
+
+#[test]
+fn test_register_existing_pool_requires_admin_auth_and_leaves_no_state() {
+    let te = setup();
+    let pool_address = new_initialized_pool(&te, &te.asset);
+
+    // Drop every mocked authorization: only the factory admin may adopt a pool.
+    te.env.set_auths(&[]);
+    let result = te
+        .factory
+        .try_register_existing_pool(&te.asset, &pool_address);
+    assert!(result.is_err(), "expected an auth failure, got {result:?}");
+    assert!(
+        std::format!("{result:?}").contains("InvalidAction"),
+        "expected an auth failure, got {result:?}"
+    );
+
+    assert_eq!(te.factory.get_pool_for_asset(&te.asset), None);
+    assert_eq!(te.factory.list_assets().len(), 0);
 }
 
 #[test]

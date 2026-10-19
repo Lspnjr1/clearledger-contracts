@@ -10,7 +10,11 @@ pub enum PoolFactoryError {
     /// contract it was handed, because that invoice contract has not been
     /// initialized (or is not an invoice contract at all).
     InvoiceNotInitialized = 4,
-    /// `register_existing_pool` was given an address that does not expose a
-    /// pool initialized for the requested asset.
+    /// The pool address is malformed or unreachable: it does not expose a
+    /// callable `get_funding_asset`, or the call failed/trapped.
     InvalidPool = 5,
+    /// The pool answered `get_funding_asset` but reported an asset different
+    /// from the `asset` the caller declared. Registration is rejected so the
+    /// factory never records a mapping whose asset and pool disagree.
+    FundingAssetMismatch = 6,
 }

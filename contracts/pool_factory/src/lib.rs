@@ -116,6 +116,11 @@ impl PoolFactoryContract {
     ///   invoice/escrow/asset/registry addresses).
     /// * `PoolError::EscrowAssetMismatch` if `escrow_contract` was initialized
     ///   with a different asset than `asset`.
+    /// * `FundingAssetMismatch` if the deployed instance reports a funding
+    ///   asset other than `asset` after initialization. In that case nothing
+    ///   is written to the registry mapping.
+    /// * `InvalidPool` if the deployed instance does not expose a callable
+    ///   `get_funding_asset`.
     ///
     /// # Returns
     /// * `Address` - The address of the newly deployed pool instance.
@@ -152,8 +157,14 @@ impl PoolFactoryContract {
             &escrow_contract,
         );
 
+        // Verify the instance actually initialized for the declared asset
+        // before recording it. A pool Wasm is admin-supplied, so the factory
+        // must not take `initialize`'s word for it: the on-chain funding asset
+        // is the source of truth every later fund/repay/escrow flow relies on.
+        Self::assert_pool_funding_asset(&env, &asset, &pool_address);
+
         // Recorded last, so a lookup can never observe a pool that has been
-        // deployed but not yet initialized.
+        // deployed but not yet initialized, and a mismatch leaves no mapping.
         Self::record_pool(&env, &asset, &pool_address);
         events::pool_instance_created(&env, &asset, &pool_address);
         pool_address
@@ -170,14 +181,26 @@ impl PoolFactoryContract {
     /// * `asset` - The asset address to register.
     /// * `pool_address` - The existing pool contract address.
     ///
+    /// # Trust boundary
+    /// The factory trusts only the database key written by this account, not
+    /// the caller's claim about what `pool_address` represents. Before any
+    /// registry write it reads the pool's own `get_funding_asset` view and
+    /// requires it to equal `asset`; a pool that reports a different asset is
+    /// rejected and no mapping, index entry, or registration event is
+    /// produced. An address that cannot answer the view (an account, a
+    /// non-pool contract, or a trapping call) is rejected as `InvalidPool`
+    /// rather than being adopted on trust.
+    ///
     /// # Auth
     /// Requires authorization from the admin.
     ///
     /// # Panics
     /// * `NotInitialized` if the factory has not been initialized.
     /// * `AssetAlreadyRegistered` if the asset is already registered.
-    /// * `InvalidPool` if `pool_address` does not expose a pool initialized
-    ///   for `asset`.
+    /// * `InvalidPool` if `pool_address` is malformed or unreachable (it does
+    ///   not expose a callable, decodable `get_funding_asset`).
+    /// * `FundingAssetMismatch` if `pool_address` is a readable pool whose
+    ///   funding asset differs from `asset`.
     ///
     /// # Returns
     /// * `()` - No value is returned.
@@ -191,14 +214,7 @@ impl PoolFactoryContract {
         admin.require_auth();
         Self::assert_unregistered(&env, &asset);
 
-        let pool_funding_asset = env.try_invoke_contract::<Address, soroban_sdk::Error>(
-            &pool_address,
-            &Symbol::new(&env, "get_funding_asset"),
-            Vec::new(&env),
-        );
-        if !matches!(pool_funding_asset, Ok(Ok(ref funding_asset)) if funding_asset == &asset) {
-            panic_with_error!(&env, PoolFactoryError::InvalidPool);
-        }
+        Self::assert_pool_funding_asset(&env, &asset, &pool_address);
 
         Self::record_pool(&env, &asset, &pool_address);
         events::existing_pool_registered(&env, &asset, &pool_address);
@@ -325,6 +341,26 @@ impl PoolFactoryContract {
             .has(&DataKey::PoolForAsset(asset.clone()))
         {
             panic_with_error!(env, PoolFactoryError::AssetAlreadyRegistered);
+        }
+    }
+
+    /// Panics unless `pool_address` reports `asset` as its funding asset.
+    ///
+    /// Distinguishes a readable pool that disagrees with the caller
+    /// (`FundingAssetMismatch`) from one that cannot be read at all
+    /// (`InvalidPool`). Both paths happen before `record_pool`, so a failed
+    /// check cannot leave a partial registry entry behind.
+    fn assert_pool_funding_asset(env: &Env, asset: &Address, pool_address: &Address) {
+        match env.try_invoke_contract::<Address, soroban_sdk::Error>(
+            pool_address,
+            &Symbol::new(env, "get_funding_asset"),
+            Vec::new(env),
+        ) {
+            Ok(Ok(funding_asset)) if &funding_asset == asset => {}
+            Ok(Ok(_)) => panic_with_error!(env, PoolFactoryError::FundingAssetMismatch),
+            // Address is not a contract, the call trapped, or the return value
+            // was not an Address: never adopt an unverifiable pool.
+            _ => panic_with_error!(env, PoolFactoryError::InvalidPool),
         }
     }
 

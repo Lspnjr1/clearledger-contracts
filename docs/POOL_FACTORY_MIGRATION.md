@@ -62,8 +62,20 @@ The `register_existing_pool` function has been implemented. This function:
 - Accepts `asset: Address` and `pool_address: Address` parameters
 - Requires admin authorization
 - Checks that the asset is not already registered
+- Reads `pool_address`'s `get_funding_asset` view and rejects the registration
+  unless it equals the declared `asset`, so a caller cannot point an asset at a
+  pool that custodies something else
+- Rejects addresses that cannot answer that view (accounts, non-pool
+  contracts, trapping calls) as `InvalidPool`; a readable pool that reports a
+  different asset is rejected as `FundingAssetMismatch`. Neither path writes the
+  mapping, index entry, or registration event
 - Updates the same storage keys as `register_asset` would, but skips deployment
 - Updates the asset index and asset-to-pool mapping
+
+**Trust boundary:** the factory treats the declared `asset` and the pool's
+on-chain funding asset as independent claims and only records a mapping when
+they agree. `register_asset` applies the same check to the instance it just
+deployed, before recording it.
 
 Assets registered after the migration go through `register_asset`, which
 deploys and initializes the pool instance instead of adopting an existing one.
